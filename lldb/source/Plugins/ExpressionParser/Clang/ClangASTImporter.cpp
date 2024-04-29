@@ -661,6 +661,15 @@ bool ClangASTImporter::importRecordLayoutFromOrigin(
   if (!definition || !definition->isCompleteDefinition())
     return false;
 
+  // Clang needs a complete type to compute the layout. Forcefully
+  // completed types have default parameters that may make them
+  // ill-formed as base types. For example, the PrimaryBase type must
+  // be polymorphic.
+  if (CXXRecordDecl *cxx_record_decl = dyn_cast<CXXRecordDecl>(definition)) {
+    if (TypeSystemClang::HasForcefullyCompletedBase(cxx_record_decl))
+      return false;
+  }
+
   const ASTRecordLayout &record_layout(
       origin_record->getASTContext().getASTRecordLayout(origin_record.decl));
 

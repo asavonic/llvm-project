@@ -1,0 +1,72 @@
+# This is a regression test that was reduced from Unreal Engine v5.3.2
+# libUnrealEditor-SlateCore.so.
+#
+# It demonstrates a case that occurs in other UE libraries as well,
+# where one library contans a definition of a derived class
+# (USlateWidgetStyleContainerBase), and only a declaration of its base
+# class (UObject). Another library contains definition of the base
+# class.
+#
+# In some cases, this led to LLDB not finding a complete type in time,
+# and forcefully completing it to temporary satisfy Clang's
+# requirements on base classes. This completion gives these types
+# default definition values, which may be ill-formed in some cases.
+# For example, a PrimaryBase class must be Polymorphic, but it is not
+# set by default when a type is forcefully completed.
+#
+# A trivial example did not trigger, so the test uses a DWARF snippet
+# from the original library.
+
+# RUN: rm -rf %t && mkdir %t
+# RUN: split-file %S/Inputs/force-complete.cpp %t
+
+# RUN: yaml2obj %t/fake.yaml -o %t/libfakedwarf.so
+# RUN: %clangxx --target=x86_64-pc-linux -shared -fPIC -g %t/coreuobject.cpp -o %t/libfakeuobject.so
+#
+# RUN: %clangxx --target=x86_64-pc-linux -shared %t/fake.cpp %t/libfakeuobject.so -o %t/libfakerepro.so
+# RUN: llvm-objcopy --remove-section=.debug* %t/libfakerepro.so
+#
+# RUN: llvm-objcopy --dump-section=.debug_str=%t/libfakedwarf.debug_str %t/libfakedwarf.so
+# RUN: llvm-objcopy --add-section=.debug_str=%t/libfakedwarf.debug_str %t/libfakerepro.so
+#
+# RUN: llvm-objcopy --dump-section=.debug_abbrev=%t/libfakedwarf.debug_abbrev %t/libfakedwarf.so
+# RUN: llvm-objcopy --add-section=.debug_abbrev=%t/libfakedwarf.debug_abbrev %t/libfakerepro.so
+#
+# RUN: llvm-objcopy --dump-section=.debug_ranges=%t/libfakedwarf.debug_ranges %t/libfakedwarf.so
+# RUN: llvm-objcopy --add-section=.debug_ranges=%t/libfakedwarf.debug_ranges %t/libfakerepro.so
+#
+# RUN: llvm-objcopy --dump-section=.debug_info=%t/libfakedwarf.debug_info %t/libfakedwarf.so
+# RUN: llvm-objcopy --add-section=.debug_info=%t/libfakedwarf.debug_info %t/libfakerepro.so
+#
+# RUN: %clangxx --target=x86_64-pc-linux -g %t/main.cpp %t/libfakerepro.so %t/libfakeuobject.so -o %t/a.out
+# RUN: %lldb %t/a.out -s %s -o exit 2>&1 | FileCheck %s
+
+breakpoint set -n trigger
+process launch
+
+# CHECK: (USlateWidgetStyleContainerBase) $0 = {}
+expression *ctl
+
+# CHECK: class USlateWidgetStyleContainerBase : public UObject, public ISlateWidgetStyleContainerInterface {
+# CHECK:     static const EClassFlags StaticClassFlags = 268435456U;
+# CHECK: public:
+# CHECK:     static void StaticRegisterNativesUSlateWidgetStyleContainerBase();
+# CHECK:     static UClass *GetPrivateStaticClass();
+# CHECK:     static UClass *StaticClass();
+# CHECK:     static const TCHAR *StaticPackage();
+# CHECK:     static EClassCastFlags StaticClassCastFlags();
+# CHECK:     static void *operator new();
+# CHECK:     static void *operator new();
+# CHECK:     static void operator delete();
+# CHECK:     static virtual UObject *_getUObject();
+# CHECK:     USlateWidgetStyleContainerBase();
+# CHECK:     USlateWidgetStyleContainerBase();
+# CHECK:     USlateWidgetStyleContainerBase();
+# CHECK:     USlateWidgetStyleContainerBase();
+# CHECK:     static UObject *__VTableCtorCaller();
+# CHECK:     static void __DefaultConstructor();
+# CHECK:     virtual ~USlateWidgetStyleContainerBase();
+# CHECK:     static virtual const FSlateWidgetStyle *const GetStyle();
+# CHECK: }
+
+image lookup --type USlateWidgetStyleContainerBase

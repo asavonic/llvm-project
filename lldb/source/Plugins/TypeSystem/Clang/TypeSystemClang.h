@@ -728,6 +728,8 @@ public:
 
   bool IsForcefullyCompleted(lldb::opaque_compiler_type_t type) override;
 
+  static bool HasForcefullyCompletedBase(const clang::CXXRecordDecl *decl);
+
   // Accessors
 
   ConstString GetTypeName(lldb::opaque_compiler_type_t type,

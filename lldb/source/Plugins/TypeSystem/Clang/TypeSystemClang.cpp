@@ -6139,12 +6139,21 @@ CompilerType TypeSystemClang::GetChildCompilerTypeAtIndex(
           llvm::cast<clang::RecordType>(parent_qual_type.getTypePtr());
       const clang::RecordDecl *record_decl = record_type->getDecl();
       assert(record_decl);
+
+      const clang::CXXRecordDecl *cxx_record_decl =
+          llvm::dyn_cast<clang::CXXRecordDecl>(record_decl);
+
+      // Clang needs a complete type to compute the layout. Forcefully
+      // completed types have default parameters that may make them
+      // ill-formed as base types. For example, the PrimaryBase type
+      // must be polymorphic.
+      if (cxx_record_decl && HasForcefullyCompletedBase(cxx_record_decl))
+        return CompilerType();
+
       const clang::ASTRecordLayout &record_layout =
           getASTContext().getASTRecordLayout(record_decl);
       uint32_t child_idx = 0;
 
-      const clang::CXXRecordDecl *cxx_record_decl =
-          llvm::dyn_cast<clang::CXXRecordDecl>(record_decl);
       if (cxx_record_decl) {
         // We might have base classes to print out first
         clang::CXXRecordDecl::base_class_const_iterator base_class,
@@ -9702,4 +9711,37 @@ bool TypeSystemClang::SetDeclIsForcefullyCompleted(const clang::TagDecl *td) {
   m_has_forcefully_completed_types = true;
   metadata->SetIsForcefullyCompleted();
   return true;
+}
+
+bool TypeSystemClang::HasForcefullyCompletedBase(
+    const clang::CXXRecordDecl *root_decl) {
+
+  llvm::SmallVector<const CXXRecordDecl *, 16> Worklist;
+  llvm::SmallSet<const CXXRecordDecl *, 16> Visited;
+
+  Worklist.push_back(root_decl);
+
+  while (!Worklist.empty()) {
+    const CXXRecordDecl *decl = Worklist.pop_back_val();
+    auto it_new = Visited.insert(decl);
+    if (!it_new.second)
+      continue;
+
+    for (const clang::CXXBaseSpecifier &base : decl->bases()) {
+      QualType base_ty = base.getTypeSourceInfo()->getType();
+      const CXXRecordDecl *base_decl = base_ty->getAsCXXRecordDecl();
+      if (!base_decl)
+        continue;
+
+      TypeSystemClang *ast =
+          TypeSystemClang::GetASTContext(&base_decl->getASTContext());
+
+      if (ast->GetType(base_ty).IsForcefullyCompleted())
+        return true;
+
+      Worklist.push_back(base_decl);
+    }
+  }
+
+  return false;
 }
